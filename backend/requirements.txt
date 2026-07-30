@@ -1,0 +1,26 @@
+# --- Web-фреймворк и сервер ---
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# --- База данных (async SQLAlchemy + драйвер Postgres) ---
+sqlalchemy[asyncio]==2.0.35
+asyncpg==0.29.0
+
+# --- Валидация и настройки ---
+pydantic==2.9.2
+pydantic-settings==2.5.2
+
+# --- HTTP-клиент для похода в LLM (OpenRouter) ---
+httpx==0.27.2
+
+# --- Оркестрация агента: граф состояний, retry policy, checkpoint, HITL ---
+langgraph==1.2.10
+# Чекпоинтер LangGraph поверх Postgres — свой драйвер (psycopg, не asyncpg,
+# на котором работает SQLAlchemy/тикеты). Два разных клиента к одной базе
+# для двух разных забот (см. app/agent/graph/checkpointer.py).
+langgraph-checkpoint-postgres==3.1.0
+psycopg[binary,pool]==3.3.4
+
+# --- RAG (опционально). По умолчанию используем локальный ретривер без внешних
+#     зависимостей. Раскомментируйте, если поднимаете Qdrant через docker compose. ---
+# qdrant-client==1.11.2

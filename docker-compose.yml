@@ -1,0 +1,82 @@
+name: support-agent-v3
+
+services:
+  # --- База данных ---
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: support
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # --- Бэкенд (FastAPI). Агент живёт ВНУТРИ бэкенда (in-process). ---
+  backend:
+    build: ./backend
+    env_file: .env
+    environment:
+      # Внутри compose ходим к БД по имени сервиса `db` (не localhost из .env).
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/support
+      # Тот же адрес, но для чекпоинтера LangGraph — другой драйвер (psycopg,
+      # не asyncpg), поэтому отдельная переменная, см. .env.example.
+      CHECKPOINTER_DSN: postgresql://postgres:postgres@db:5432/support
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      # Правки базы знаний подхватываются без пересборки образа.
+      - ./backend/knowledge_base:/app/knowledge_base
+      # Горячая перезагрузка кода на воркшопе (опционально):
+      # - ./backend/app:/app/app
+    # Для hot-reload раскомментируйте команду выше и строку ниже:
+    # command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # --- Фронтенд (React, собранный и отданный через nginx) ---
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+
+  # ─────────────────────────────────────────────────────────────
+  # ОПЦИОНАЛЬНО: RAG на Qdrant (векторная БД).
+  #   Включить:  docker compose --profile qdrant up --build
+  #   Затем в .env: RETRIEVER_TYPE=qdrant
+  # ─────────────────────────────────────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:latest
+    profiles: ["qdrant"]
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+
+  # ─────────────────────────────────────────────────────────────
+  # ОПЦИОНАЛЬНО: локальная LLM вместо OpenRouter (агент работает офлайн).
+  # По умолчанию ВЫКЛЮЧЕНО (закомментировано). Чтобы использовать:
+  #   1) поднимите Ollama и скачайте модель (ollama pull llama3.1);
+  #   2) реализуйте локальный LLM-клиент в build_llm() (app/agent/factory.py);
+  #   3) пропишите базовый URL модели в .env.
+  # ─────────────────────────────────────────────────────────────
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+
+volumes:
+  pgdata:
+  qdrant_storage:
+  # ollama_data:
