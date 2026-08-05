@@ -7,11 +7,37 @@
 
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _ignore_empty_env_vars(cls, data):
+        """Пустая переменная окружения = «не задана», а не «пустая строка».
+
+        Нужно для платформ вроде Coolify: разбирая compose-файл, они заводят
+        запись для КАЖДОЙ `${VAR}` и подставляют в контейнер пустую строку,
+        даже если значение не заполнено. В compose при этом стоит
+        `${MIN_CONFIDENCE:-0.6}`, то есть дефолт как будто есть — но до него
+        дело не доходит: пустая строка долетает до pydantic, и он падает на
+        `min_confidence`, `agent_max_steps`, `refund_auto_limit` и прочих
+        числовых полях («Input should be a valid number, input_value=''»).
+        Бэкенд не стартует, уходит в цикл перезапусков, а снаружи это выглядит
+        просто как 502 без единой строчки в логах — реальная находка при
+        первом деплое игры.
+
+        Отбрасываем пустые значения, чтобы применились дефолты, объявленные
+        здесь же. На обязательные секреты это не влияет: пустой
+        SESSION_SECRET/ADMIN_PASSWORD так и останется пустым и будет пойман
+        `validate_game_settings` — с внятной ошибкой вместо парсинга.
+        """
+        if isinstance(data, dict):
+            return {k: v for k, v in data.items() if v != ""}
+        return data
 
     # --- База данных ---
     database_url: str = "postgresql+asyncpg://postgres:postgres@db:5432/support"
