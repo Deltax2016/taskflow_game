@@ -17,9 +17,16 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?нужен POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-support}
+      # Креды БД заданы ЗДЕСЬ, а не через переменные Coolify — сознательно.
+      # База не публикует портов и доступна только внутри docker-сети этого
+      # стека, наружу её не достать. Зато пароль в переменных окружения
+      # платформы приводил к неочевидному отказу: том Postgres инициализируется
+      # паролем ОДИН РАЗ и переживает редеплои, поэтому рассинхрон между
+      # значением в панели и значением в томе выглядел как вечный 502 без
+      # логов. Фиксированные внутренние креды убирают этот класс сбоев целиком.
+      POSTGRES_USER: taskflow
+      POSTGRES_PASSWORD: taskflow_internal_only
+      POSTGRES_DB: support
     volumes:
       # ВАЖНО: имя тома с суффиксом. Postgres задаёт пароль пользователя ТОЛЬКО
       # при первой инициализации пустого каталога данных — дальше том хранит
@@ -30,7 +37,7 @@ services:
       # имя тома (или удаление старого руками на сервере).
       - pgdata_v2:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      test: ["CMD-SHELL", "pg_isready -U taskflow"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -39,10 +46,10 @@ services:
   backend:
     build: ./backend
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-support}
+      DATABASE_URL: postgresql+asyncpg://taskflow:taskflow_internal_only@db:5432/support
       # У чекпоинтера LangGraph свой драйвер (psycopg, не asyncpg) — та же
       # база, другой клиент, поэтому вторая переменная.
-      CHECKPOINTER_DSN: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-support}
+      CHECKPOINTER_DSN: postgresql://taskflow:taskflow_internal_only@db:5432/support
 
       AGENT_TYPE: tooluse
       GAME_MODE: "true"
