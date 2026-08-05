@@ -28,14 +28,17 @@ services:
       POSTGRES_PASSWORD: taskflow_internal_only
       POSTGRES_DB: support
     volumes:
-      # ВАЖНО: имя тома с суффиксом. Postgres задаёт пароль пользователя ТОЛЬКО
-      # при первой инициализации пустого каталога данных — дальше том хранит
-      # старый пароль, и смена POSTGRES_PASSWORD в переменных окружения ни на
-      # что не влияет: бэкенд получает "password authentication failed for
-      # user postgres" и уходит в цикл перезапусков. Том переживает редеплой,
-      # поэтому единственный способ пересоздать базу с новым паролем — новое
-      # имя тома (или удаление старого руками на сервере).
-      - pgdata_v2:/var/lib/postgresql/data
+      # ВАЖНО: суффикс версии в имени тома. Postgres создаёт пользователя и
+      # пароль ТОЛЬКО при первой инициализации пустого каталога данных. Том
+      # переживает редеплои, поэтому изменить POSTGRES_USER/PASSWORD у уже
+      # созданного тома невозможно — бэкенд будет получать
+      # "password authentication failed" и крутиться в цикле перезапусков.
+      #
+      # ПРАВИЛО: меняешь POSTGRES_USER или POSTGRES_PASSWORD — обязательно
+      # меняй и суффикс тома, в ОДНОМ коммите. Иначе деплой между двумя
+      # правками проинициализирует том старыми кредами, и следующая правка
+      # уже ни на что не повлияет (ровно так и вышло с pgdata_v2).
+      - pgdata_v3:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U taskflow"]
       interval: 5s
@@ -97,5 +100,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  pgdata_v2:
+  pgdata_v3:
   uploads:
