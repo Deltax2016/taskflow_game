@@ -72,3 +72,24 @@ class LLMDecision(BaseModel):
     answer: str = Field(description="Ответ пользователю (пусто, если can_answer=false)")
     confidence: float = Field(ge=0.0, le=1.0, description="Уверенность в ответе 0..1")
     reason: str = Field(description="Краткое обоснование решения")
+
+
+class ToolCallDecision(BaseModel):
+    """Ответ LLM в режиме tool-calling (занятие 3): либо текст, либо ОДИН
+    запрос на вызов инструмента.
+
+    Намеренно НЕ pydantic-схема, которую заполняет сама модель (как
+    `LLMDecision`) — это разбор ответа OpenAI-совместимого Chat Completions
+    API (`message.content` либо `message.tool_calls[0]`), который делает
+    `OpenRouterLLM.complete_with_tools`. Один вызов инструмента за ход —
+    сознательное упрощение: если агенту нужно несколько инструментов, он
+    получит их за несколько витков цикла `decide_or_act ⇄ dispatch_tool`,
+    а не за один параллельный запрос. Так проще рассуждать о состоянии графа
+    и бюджете шагов.
+    """
+
+    kind: str  # "text" | "tool_call"
+    text: str | None = None
+    tool_name: str | None = None
+    tool_args: dict = Field(default_factory=dict)
+    tool_call_id: str | None = None

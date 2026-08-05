@@ -9,7 +9,7 @@ import json
 import httpx
 
 from app.agent.base import LLM, TModel
-from app.agent.schemas import ChatTurn
+from app.agent.schemas import ChatTurn, ToolCallDecision
 from app.config import Settings
 
 # OpenRouter понимает те же роли, что и OpenAI: system / user / assistant.
@@ -79,3 +79,55 @@ class OpenRouterLLM(LLM):
         data = await self._chat(payload)
         raw = data["choices"][0]["message"]["content"]
         return schema.model_validate_json(raw)
+
+    async def complete_with_tools(
+        self,
+        system: str,
+        messages: list[ChatTurn],
+        tools: list[dict],
+        *,
+        tool_transcript: list[dict] | None = None,
+    ) -> ToolCallDecision:
+        """Нативный tool-calling (занятие 3): модель либо отвечает текстом,
+        либо просит вызвать ОДИН инструмент.
+
+        `tool_transcript` — уже готовые OpenAI-сообщения ("assistant" с
+        `tool_calls` + "tool" с результатом) от предыдущих витков ReAct-цикла
+        ЭТОГО же вызова агента (см. `ToolGraphState.tool_messages`). Это не то
+        же самое, что `messages: list[ChatTurn]` — та история про переписку
+        тикета, а этот транскрипт — внутренний scratch-pad одного цикла
+        `decide_or_act ⇄ dispatch_tool`.
+
+        Поддерживаем ОДИН запрошенный вызов инструмента за ход, даже если
+        провайдер вернул несколько, — намеренное упрощение (см. `ToolCallDecision`).
+        """
+        built = self._build_messages(system, messages)
+        if tool_transcript:
+            built.extend(tool_transcript)
+
+        payload = {
+            "model": self._settings.llm_model,
+            "temperature": self._settings.llm_temperature,
+            "messages": built,
+            "tools": tools,
+            "tool_choice": "auto",
+        }
+        data = await self._chat(payload)
+        message = data["choices"][0]["message"]
+        tool_calls = message.get("tool_calls")
+
+        if tool_calls:
+            call = tool_calls[0]
+            raw_args = call.get("function", {}).get("arguments") or "{}"
+            try:
+                args = json.loads(raw_args)
+            except json.JSONDecodeError:
+                args = {}
+            return ToolCallDecision(
+                kind="tool_call",
+                tool_name=call["function"]["name"],
+                tool_args=args,
+                tool_call_id=call["id"],
+            )
+
+        return ToolCallDecision(kind="text", text=(message.get("content") or "").strip())

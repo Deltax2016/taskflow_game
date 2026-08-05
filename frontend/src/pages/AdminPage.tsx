@@ -17,6 +17,18 @@ function pendingDraft(ticket: Ticket | null): { draft_answer?: string; confidenc
   return last.meta as { draft_answer?: string; confidence?: number };
 }
 
+// Human-in-the-Loop (AGENT_TYPE=tooluse): агент хочет вызвать критический
+// инструмент (напр. create_refund выше лимита) — ждёт решения оператора
+// ДО того, как вызов реально выполнится. Признак — meta.requires_tool_approval.
+function pendingToolCall(
+  ticket: Ticket | null
+): { pending_tool_name?: string; pending_tool_args?: Record<string, unknown> } | null {
+  if (!ticket || ticket.status !== "pending_human" || ticket.messages.length === 0) return null;
+  const last = ticket.messages[ticket.messages.length - 1];
+  if (last.role !== "system" || !last.meta?.requires_tool_approval) return null;
+  return last.meta as { pending_tool_name?: string; pending_tool_args?: Record<string, unknown> };
+}
+
 // Админка оператора: очередь тикетов, переданных человеку, и ответы на них.
 export default function AdminPage() {
   const [filter, setFilter] = useState<Filter>("queue");
@@ -28,6 +40,7 @@ export default function AdminPage() {
   const [error, setError] = useState("");
 
   const draft = pendingDraft(selected);
+  const toolCall = pendingToolCall(selected);
 
   const refresh = useCallback(async () => {
     setError("");
@@ -96,6 +109,24 @@ export default function AdminPage() {
       const ticket = await api.adminResolveDraft(selected.id, approve, edited);
       setSelected(ticket);
       setDraftText(pendingDraft(ticket)?.draft_answer ?? "");
+      await refresh();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Human-in-the-Loop (tooluse): одобрить/отклонить сам ВЫЗОВ инструмента —
+  // аргументы (сумма, причина) уже зафиксированы моделью, редактировать их
+  // здесь нельзя (см. TicketService.resume_tool_approval).
+  async function handleResolveToolCall(approve: boolean) {
+    if (!selected) return;
+    setBusy(true);
+    setError("");
+    try {
+      const ticket = await api.adminResolveToolCall(selected.id, approve);
+      setSelected(ticket);
       await refresh();
     } catch (err) {
       setError(String(err));
@@ -184,6 +215,35 @@ export default function AdminPage() {
                     onClick={() => handleResolveDraft(false)}
                   >
                     Отклонить, отвечу сам
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {toolCall && (
+              <div className="draft-panel mt">
+                <div className="draft-panel__head">
+                  Агент хочет вызвать критический инструмент
+                </div>
+                <div className="tool-call-preview">
+                  <code>{toolCall.pending_tool_name}</code>
+                  <pre>{JSON.stringify(toolCall.pending_tool_args, null, 2)}</pre>
+                </div>
+                <div className="row">
+                  <button
+                    className="btn btn--primary"
+                    disabled={busy}
+                    onClick={() => handleResolveToolCall(true)}
+                  >
+                    {busy ? "Отправка…" : "Разрешить вызов"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--ghost"
+                    disabled={busy}
+                    onClick={() => handleResolveToolCall(false)}
+                  >
+                    Отклонить
                   </button>
                 </div>
               </div>

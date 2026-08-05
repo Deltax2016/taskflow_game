@@ -9,11 +9,14 @@ from langgraph.types import Checkpointer
 
 from app.agent.base import LLM, Agent, Retriever
 from app.agent.graph import build_graph
+from app.agent.graph.build_tool_graph import build_tool_graph
 from app.agent.langgraph_agent import LangGraphSupportAgent
 from app.agent.llm import OpenRouterLLM
 from app.agent.rag import LocalRetriever, QdrantRetriever
 from app.agent.simple import SimpleRagAgent
 from app.agent.support import SupportAgent
+from app.agent.tool_agent import ToolAgent
+from app.agent.tools import build_tool_registry
 from app.config import Settings, get_settings
 
 
@@ -60,5 +63,10 @@ def build_agent(settings: Settings | None = None, checkpointer: Checkpointer = N
         escalated_llm = build_escalated_llm(settings)
         graph = build_graph(llm, escalated_llm, retriever, settings, checkpointer)
         return LangGraphSupportAgent(graph, settings)
+    if settings.agent_type == "tooluse":
+        escalated_llm = build_escalated_llm(settings)
+        registry = build_tool_registry(settings)
+        graph = build_tool_graph(llm, escalated_llm, retriever, registry, settings, checkpointer)
+        return ToolAgent(graph, settings)
 
     raise ValueError(f"Unsupported agent_type: {settings.agent_type!r}")

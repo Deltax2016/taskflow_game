@@ -18,6 +18,12 @@ Human-in-the-Loop (`DraftResumable`) и остановился на чернов
 PENDING_HUMAN несёт в `meta` пометку `requires_approval` с текстом черновика;
 `resume_agent_draft()` резюмирует граф ответом оператора (одобрить/поправить/
 отклонить) и применяет тот же самый `_apply_agent_result`, что и обычный путь.
+
+Занятие 3 (tool use) добавляет ВТОРУЮ, независимую дугу HITL: агент
+(`ToolCallApprovable`) может остановиться перед вызовом критического
+инструмента (`requires_tool_approval` в `meta`) — `resume_tool_approval()`
+резюмирует граф решением «выполнить/отклонить именно этот вызов», текста
+здесь редактировать нечего (см. `agent/tool_agent.py`).
 """
 
 from collections.abc import Sequence
@@ -26,7 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent import Agent, AgentAction, AgentRequest, AgentResult, ChatTurn
-from app.agent.base import DraftResumable
+from app.agent.base import DraftResumable, ToolCallApprovable
 from app.config import Settings
 from app.models import Message, MessageRole, Ticket, TicketStatus
 from app.schemas import FollowUpCreate, HumanReply, TicketCreate
@@ -40,11 +46,19 @@ class TicketNotFound(Exception):
 
 
 class DraftResumeNotSupported(Exception):
-    """Текущий агент (AGENT_TYPE != langgraph) не умеет резюмировать черновики."""
+    """Текущий агент (AGENT_TYPE != langgraph/tooluse) не умеет резюмировать черновики."""
 
 
 class NoDraftPending(Exception):
     """У тикета сейчас нет черновика, ожидающего решения оператора."""
+
+
+class ToolApprovalNotSupported(Exception):
+    """Текущий агент (AGENT_TYPE != tooluse) не умеет одобрять вызовы инструментов."""
+
+
+class NoToolCallPending(Exception):
+    """У тикета сейчас нет вызова инструмента, ожидающего решения оператора."""
 
 
 class TicketService:
@@ -55,12 +69,47 @@ class TicketService:
 
     # --- Публичные операции ---
 
-    async def create_ticket(self, data: TicketCreate) -> Ticket:
+    async def create_draft_ticket(self, data: TicketCreate, *, player_id: int | None = None) -> Ticket:
+        """Создаёт обращение, НЕ запуская агента (игровой режим).
+
+        Нужно, чтобы участник успел приложить файл до того, как агент
+        прочитает вопрос: инструмент `read_attached_file` иначе не найдёт
+        вложений, и файл окажется бесполезен. Запуск — `run_agent_on_ticket`.
+        """
+        ticket = Ticket(subject=data.subject, status=TicketStatus.OPEN, player_id=player_id)
+        ticket.messages.append(Message(role=MessageRole.USER, content=data.question))
+        self._session.add(ticket)
+        await self._session.flush()
+        await self._session.commit()
+        await self._session.refresh(ticket)
+        return ticket
+
+    async def run_agent_on_ticket(self, ticket_id: int) -> Ticket:
+        """Запускает агента по уже созданному обращению (после загрузки файлов)."""
+        ticket = await self.get_ticket(ticket_id)
+        question = next(
+            (m.content for m in reversed(ticket.messages) if m.role == MessageRole.USER),
+            "",
+        )
+        await self._process_with_agent(ticket, question)
+        await self._session.commit()
+        await self._session.refresh(ticket)
+        return ticket
+
+    async def create_ticket(self, data: TicketCreate, *, player_id: int | None = None) -> Ticket:
         """Пользователь задал вопрос → создаём тикет и сразу отдаём агенту."""
-        ticket = Ticket(subject=data.subject, status=TicketStatus.OPEN)
+        ticket = Ticket(subject=data.subject, status=TicketStatus.OPEN, player_id=player_id)
         ticket.messages.append(Message(role=MessageRole.USER, content=data.question))
         self._session.add(ticket)
         await self._session.flush()  # получаем ticket.id
+        # Коммитим СЕЙЧАС, а не одним махом в конце вместе с ответом агента
+        # (как было в занятиях 1-3): инструменты занятия 3 (create_refund)
+        # пишут в БД через СВОЮ, отдельную сессию — если тикет ещё не
+        # закоммичен, внешний ключ refunds.ticket_id его не увидит
+        # (IntegrityError). `expire_on_commit=False` у SessionLocal
+        # (database.py) гарантирует, что `ticket` останется рабочим ORM-
+        # объектом в этой же сессии и после промежуточного commit.
+        await self._session.commit()
 
         await self._process_with_agent(ticket, data.question)
 
@@ -132,6 +181,37 @@ class TicketService:
         # существовал средний, "human_approval_threshold" диапазон). Отказ
         # оператора всегда уходит в эскалацию — там гейт не имеет значения.
         self._apply_agent_result(ticket, result, enforce_confidence_gate=not approve)
+
+        await self._session.commit()
+        await self._session.refresh(ticket)
+        return ticket
+
+    async def resume_tool_approval(self, ticket_id: int, *, approve: bool) -> Ticket:
+        """Оператор одобряет/отклоняет ВЫЗОВ КРИТИЧЕСКОГО ИНСТРУМЕНТА (занятие 3),
+        например `create_refund` выше лимита — см. `agent/tools/server_side.py`.
+
+        В отличие от `resume_agent_draft`, здесь нечего редактировать (текста
+        ответа ещё нет — цикл инструментов не закончился) и гейт уверенности
+        применяется как обычно: одобрение вызова инструмента — это НЕ то же
+        самое, что одобрение финального ответа, дальше граф сам решит,
+        достаточно ли уверенности отвечать (см. `finalize_decide_cheap/escalated`).
+        """
+        if not isinstance(self._agent, ToolCallApprovable):
+            raise ToolApprovalNotSupported(ticket_id)
+
+        ticket = await self.get_ticket(ticket_id)
+        last = ticket.messages[-1] if ticket.messages else None
+        thread_id = (last.meta or {}).get("thread_id") if last else None
+        if (
+            ticket.status != TicketStatus.PENDING_HUMAN
+            or last is None
+            or not (last.meta or {}).get("requires_tool_approval")
+            or not thread_id
+        ):
+            raise NoToolCallPending(ticket_id)
+
+        result = await self._agent.resume_tool_approval(thread_id, approve=approve)
+        self._apply_agent_result(ticket, result)
 
         await self._session.commit()
         await self._session.refresh(ticket)

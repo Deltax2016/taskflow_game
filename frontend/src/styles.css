@@ -137,6 +137,23 @@ textarea:focus {
   font-size: 13px;
   color: #92400e;
 }
+.tool-call-preview {
+  background: #fff;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+.tool-call-preview code {
+  font-weight: 600;
+}
+.tool-call-preview pre {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  color: var(--muted);
+}
 
 /* --- Кнопки --- */
 .btn {
@@ -344,4 +361,96 @@ textarea:focus {
   border-radius: 8px;
   margin-bottom: 12px;
   font-size: 14px;
+}
+
+/* --- Игровой режим --- */
+.game-login {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 860px) {
+  .game-login {
+    grid-template-columns: 1fr;
+  }
+}
+
+.game-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+}
+.game-bar__name {
+  font-weight: 600;
+  font-size: 15px;
+}
+.game-bar__balance {
+  font-size: 26px;
+  font-weight: 700;
+  color: #3730a3;
+  line-height: 1.2;
+}
+
+.leaderboard {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.leaderboard__row {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--card-bg, #f8fafc);
+  border: 1px solid #e5e7eb;
+  font-size: 14px;
+}
+.leaderboard__row--me {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+  font-weight: 600;
+}
+.leaderboard__rank {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.leaderboard__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.leaderboard__score {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.list__item--active {
+  border-color: #6366f1;
+  background: #eef2ff;
+}
+
+.attach-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+.attach-chip {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  color: #475569;
 }

@@ -29,6 +29,7 @@ class GraphState(TypedDict, total=False):
     """
 
     # --- Вход (заполняется один раз при первом вызове) ---
+    ticket_id: int  # какому тикету принадлежит вызов — читают инструменты (занятие 3)
     question: str
     history: list[dict]  # список ChatTurn.model_dump() — плоские dict для чекпоинтера
     started_at: float  # time.monotonic() на старте — бюджет по времени

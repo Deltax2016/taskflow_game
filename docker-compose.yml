@@ -1,4 +1,4 @@
-name: support-agent-v3
+name: support-agent-v4
 
 services:
   # --- База данных ---

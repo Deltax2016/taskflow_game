@@ -1,0 +1,87 @@
+# Продакшн-compose для Coolify: игра «взломай агента поддержки».
+#
+# Отличия от локального docker-compose.yml:
+#   * никаких `ports:` наружу — маршрутизацией и TLS занимается Traefik
+#     самого Coolify, а открытый порт БД в интернет был бы дырой;
+#   * пароль Postgres и все секреты приходят из переменных окружения
+#     Coolify, а не захардкожены;
+#   * том для загруженных файлов, иначе вложения исчезают при каждом деплое;
+#   * фронтенд собирается с VITE_GAME_MODE=true (Vite запекает это в бандл
+#     на этапе сборки, в рантайне переключить уже нельзя).
+#
+# Домен: Coolify подставит его в SERVICE_FQDN_FRONTEND_80 и сам выпустит
+# сертификат. Отдельный домен бэкенду не нужен — фронтовый nginx проксирует
+# /api на backend внутри сети, поэтому cookie сессии остаётся same-origin.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?нужен POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-support}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-support}
+      # У чекпоинтера LangGraph свой драйвер (psycopg, не asyncpg) — та же
+      # база, другой клиент, поэтому вторая переменная.
+      CHECKPOINTER_DSN: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-support}
+
+      AGENT_TYPE: tooluse
+      GAME_MODE: "true"
+
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?нужен OPENROUTER_API_KEY}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-4o-mini}
+      AGENT_ESCALATION_MODEL: ${AGENT_ESCALATION_MODEL:-openai/gpt-4o-mini}
+
+      # Секреты игры. Оба обязательны: приложение не стартует с пустыми
+      # (см. config.validate_game_settings) — открытая админка в публичном
+      # деплое означала бы, что участник сам себе одобряет возвраты.
+      SESSION_SECRET: ${SESSION_SECRET:?нужен SESSION_SECRET (32+ символов)}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?нужен ADMIN_PASSWORD (8+ символов)}
+
+      # Баланс игры и защита бюджета LLM от одного слишком активного участника.
+      GAME_STARTING_BALANCE: ${GAME_STARTING_BALANCE:-0}
+      GAME_COOLDOWN_SECONDS: ${GAME_COOLDOWN_SECONDS:-5}
+      REFUND_AUTO_LIMIT: ${REFUND_AUTO_LIMIT:-1000}
+      SANITIZER_MODE: ${SANITIZER_MODE:-enforce}
+      AGENT_MAX_STEPS: ${AGENT_MAX_STEPS:-15}
+      AGENT_MAX_SECONDS: ${AGENT_MAX_SECONDS:-25}
+      MIN_CONFIDENCE: ${MIN_CONFIDENCE:-0.6}
+
+      UPLOAD_DIR: /data/uploads
+      LANGGRAPH_CHECKPOINTER: postgres
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_GAME_MODE: "true"
+    environment:
+      # Магическая переменная Coolify: сюда подставится выданный домен,
+      # и Traefik начнёт маршрутизировать на порт 80 этого сервиса.
+      SERVICE_FQDN_FRONTEND_80: ${SERVICE_FQDN_FRONTEND_80:-}
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  uploads:

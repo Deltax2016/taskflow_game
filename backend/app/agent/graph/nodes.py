@@ -17,33 +17,21 @@ settings) через замыкание и возвращают саму фун�
 
 from collections.abc import Awaitable, Callable
 
-import httpx
 from pydantic import ValidationError
 
 from app.agent.base import LLM, Retriever
 from app.agent.graph.state import GraphState
 from app.agent.prompts import build_context, build_user_prompt
+from app.agent.resilience import is_transient_http_error
 from app.agent.schemas import ChatTurn, LLMDecision
 from app.config import Settings
 
 NodeFn = Callable[[GraphState], Awaitable[dict]]
 
-
-def is_transient_llm_error(exc: BaseException) -> bool:
-    """Что имеет смысл повторять через RetryPolicy, а что — нет.
-
-    Это прямой вывод из реального инцидента (см. lesson-plan): 400 Bad Request
-    из-за отсутствия слова "json" в промпте — это БАГ, повтор его не лечит,
-    только жжёт бюджет и время. А вот таймаут, 429 (rate limit) и 5xx у
-    провайдера — временные сбои, которые почти наверняка пройдут со второй
-    попытки. RetryPolicy должен различать эти два случая, а не ретраить всё
-    подряд.
-    """
-    if isinstance(exc, httpx.TimeoutException):
-        return True
-    if isinstance(exc, httpx.HTTPStatusError):
-        return exc.response.status_code in (429, 500, 502, 503, 504)
-    return False
+# Псевдоним для обратной совместимости: остальной код графа (build.py)
+# исторически импортирует это имя из nodes.py. Сама реализация — в
+# resilience.py, общая с agent/tools/.
+is_transient_llm_error = is_transient_http_error
 
 
 def make_retrieve_node(retriever: Retriever, settings: Settings) -> NodeFn:

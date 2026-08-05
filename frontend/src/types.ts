@@ -18,6 +18,13 @@ export interface Message {
   created_at: string;
 }
 
+export interface Attachment {
+  id: number;
+  original_name: string;
+  size_bytes: number;
+  created_at: string;
+}
+
 export interface Ticket {
   id: number;
   subject: string;
@@ -25,6 +32,30 @@ export interface Ticket {
   created_at: string;
   updated_at: string;
   messages: Message[];
+  attachments: Attachment[];
+}
+
+// --- Игровой режим ---
+
+export interface Player {
+  id: number;
+  display_name: string;
+  balance: number;
+}
+
+export interface LeaderboardRow {
+  display_name: string;
+  balance: number;
+}
+
+export interface HackEvent {
+  id: number;
+  player_id: number;
+  ticket_id: number;
+  amount: number;
+  bypassed_limit: boolean;
+  reason: string;
+  created_at: string;
 }
 
 export interface TicketSummary {

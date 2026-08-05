@@ -4,6 +4,12 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install
 COPY . .
+
+# Vite подставляет VITE_*-переменные на этапе СБОРКИ (в рантайне их менять
+# уже нельзя — они запечены в бандл). Поэтому режим приходит build-аргументом,
+# а не переменной окружения контейнера.
+ARG VITE_GAME_MODE=false
+ENV VITE_GAME_MODE=$VITE_GAME_MODE
 RUN npm run build
 
 # --- Этап 2: раздача через nginx ---

@@ -1,0 +1,30 @@
+# Локальный тестовый оверрей: другие порты (чтобы не конфликтовать с
+# другими версиями воркшопа) + игровой режим со слабыми, ТОЛЬКО ЛОКАЛЬНЫМИ
+# секретами. В прод не идёт — для Coolify отдельный docker-compose.coolify.yml.
+services:
+  db:
+    ports:
+      - "15490:5432"
+  backend:
+    environment:
+      GAME_MODE: "true"
+      SESSION_SECRET: local_test_secret_at_least_32_chars_long_xxx
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: localtest123
+      GAME_ALLOW_INSECURE_COOKIES: "true"
+      GAME_COOLDOWN_SECONDS: "0"
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - uploads_test:/data/uploads
+    ports:
+      - "18090:8000"
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_GAME_MODE: "true"
+    ports:
+      - "15190:80"
+
+volumes:
+  uploads_test:

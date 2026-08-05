@@ -14,7 +14,7 @@ from typing import Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel
 
-from app.agent.schemas import AgentRequest, AgentResult, ChatTurn, RetrievedChunk
+from app.agent.schemas import AgentRequest, AgentResult, ChatTurn, RetrievedChunk, ToolCallDecision
 
 TModel = TypeVar("TModel", bound=BaseModel)
 
@@ -68,6 +68,44 @@ class DraftResumable(Protocol):
     async def resume_draft(
         self, thread_id: str, *, approve: bool, edited_answer: str | None
     ) -> AgentResult: ...
+
+
+@runtime_checkable
+class ToolCallingLLM(Protocol):
+    """Узкий протокол сверх `LLM` — для tool-calling (занятие 3).
+
+    Не метод в самом `LLM` ABC: `complete`/`complete_structured` — общий
+    контракт всех занятий, а нативный tool-calling (OpenAI-совместимый
+    `tools=[...]` параметр в Chat Completions) нужен только `ToolAgent`.
+    Раздувать базовый интерфейс ради одной реализации — тот же анти-паттерн,
+    который уже решали `DraftResumable`/`Traceable` в занятии 2.
+    """
+
+    async def complete_with_tools(
+        self,
+        system: str,
+        messages: list[ChatTurn],
+        tools: list[dict],
+        *,
+        tool_transcript: list[dict] | None = None,
+    ) -> ToolCallDecision: ...
+
+
+@runtime_checkable
+class ToolCallApprovable(Protocol):
+    """Узкий протокол для агентов, у которых КРИТИЧЕСКИЕ ВЫЗОВЫ ИНСТРУМЕНТОВ
+    (не черновик ответа, как в `DraftResumable`) ждут решения оператора —
+    сейчас только `ToolAgent` (занятие 3).
+
+    Разные протоколы, а не один: у `resume_draft` есть `edited_answer` (текст
+    можно поправить), а у одобрения вызова инструмента — нет, там нечего
+    редактировать, только «да/нет» на конкретные аргументы конкретного вызова
+    (см. `create_refund` — сумма и причина уже зафиксированы моделью, менять
+    их через одобрение оператора не даём: не понравилась сумма — значит,
+    отклонить и разобраться вручную, а не подделать вызов задним числом).
+    """
+
+    async def resume_tool_approval(self, thread_id: str, *, approve: bool) -> AgentResult: ...
 
 
 @runtime_checkable
